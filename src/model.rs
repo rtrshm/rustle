@@ -7,24 +7,26 @@ use ratatui::{
     widgets::*,
     widgets::calendar::{
         CalendarEventStore,
-        Monthly,
-        self
+        Monthly
     }
 };
-use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind}
-};
-use tui_textarea::TextArea;
+use crossterm::event::{self,
+        Event, 
+        KeyCode, 
+        KeyEventKind};
 
+use tui_textarea::TextArea;
 use std::time::Duration;
-use time::OffsetDateTime;
+use time::{
+    Date,
+    OffsetDateTime};
 
 #[derive(Debug, Default)]
 pub struct Model<'a> {
     pub running_state: RunningState,
     textarea: TextArea<'a>,
     active_window: ActiveWindow,
-    calendar_out: bool
+    calendar_state: CalendarState
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -41,6 +43,21 @@ pub enum ActiveWindow {
     EditBox
 }
 
+#[derive(Debug)]
+struct CalendarState {
+    enabled: bool,
+    selected_date: Date
+}
+
+impl Default for CalendarState {
+    fn default() -> CalendarState {
+        CalendarState {
+            enabled: false,
+            selected_date: OffsetDateTime::now_utc().date()
+        }
+    }
+}
+
 #[derive(PartialEq)]
 pub enum Message {
     Left,
@@ -50,21 +67,23 @@ pub enum Message {
     Save,
     Quit,
     SwitchWindows,
+    ToggleCalendar,
+    Enter,
     Other
 }
 
 
-pub fn handle_event(_m: &mut Model) -> color_eyre::Result<Option<Message>> {
+pub fn handle_event(model: &mut Model) -> color_eyre::Result<Option<Message>> {
     if event::poll(Duration::from_millis(250)) ? {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
-                match _m.active_window {
+                match model.active_window {
                     ActiveWindow::Menu => return Ok(handle_key(key)),
                     ActiveWindow::EditBox => {
                         match key.code {
                             KeyCode::Tab => return Ok(handle_key(key)),
                             _ => {
-                                _m.textarea.input(key);
+                                model.textarea.input(key);
                                 return Ok(None)
                             }
                         }   
@@ -80,8 +99,25 @@ fn handle_key(key: event::KeyEvent) -> Option<Message> {
     match key.code {
         KeyCode::Char('q') => Some(Message::Quit),
         KeyCode::Tab => Some(Message::SwitchWindows),
+        KeyCode::Char('c') => Some(Message::ToggleCalendar),
+        KeyCode::Up => Some(Message::Up),
+        KeyCode::Down => Some(Message::Down),
+        KeyCode::Left => Some(Message::Left),
+        KeyCode::Right => Some(Message::Right),
+        KeyCode::Enter => Some(Message::Enter),
         _ => None
     }
+}
+
+fn update_date(model: &mut Model, offset_in_days: i64) {
+    let result = model.calendar_state.selected_date.checked_add(time::Duration::days(offset_in_days));
+    match result {
+        Some(result_date) =>
+            if result_date.month() == model.calendar_state.selected_date.month() {
+                model.calendar_state.selected_date = result_date
+            } 
+        _ => ()
+    };
 }
 
 pub fn update(model: &mut Model, msg: Message) -> Option<Message> {
@@ -97,6 +133,39 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Message> {
                 ActiveWindow::Menu => {
                     model.active_window = ActiveWindow::EditBox
                 }
+            }
+        },
+        Message::ToggleCalendar => {
+            model.calendar_state.enabled = !model.calendar_state.enabled;
+        },
+
+        Message::Up => {
+            if model.calendar_state.enabled {
+                update_date(model, -7);
+            }
+        },
+
+        Message::Down => {
+            if model.calendar_state.enabled {
+                update_date(model, 7);
+            }
+        },
+
+        Message::Left => {
+            if model.calendar_state.enabled{
+                update_date(model, -1);
+            }
+        },
+
+        Message::Right => {
+            if model.calendar_state.enabled {
+                update_date(model, 1)
+            }
+        },
+
+        Message::Enter => {
+            if model.calendar_state.enabled {
+                model.calendar_state.enabled = !model.calendar_state.enabled;
             }
         }
         _ => return None
@@ -142,20 +211,33 @@ pub fn view(model: &mut Model, f: &mut Frame) {
     f.render_widget(model.textarea.widget(),
         layout[1]);
 
-    let today = OffsetDateTime::now_utc().date();
-    let mut cal = Monthly::new(today,
-        CalendarEventStore::today(Style::new().red().bold())
-    );
+    if model.calendar_state.enabled {
 
-    let area = Rect {
-        width: 40,
-        height: 20,
-        x: 5, 
-        y: 5
-    };
+        let mut cal_event_store = CalendarEventStore::today(Style::new().light_blue().add_modifier(Modifier::UNDERLINED));
+        cal_event_store.add(model.calendar_state.selected_date, Style::new().red().bold());
 
-    f.render_widget(cal, area);
 
+
+        let area = Rect {
+            width: 30,
+            height: 12,
+            x: 5, 
+            y: f.size().height - 12
+        };
+
+        let cal_block = Block::bordered()
+            .border_type(BorderType::Rounded);
+
+        let cal = 
+            Monthly::new(model.calendar_state.selected_date, cal_event_store)
+                .block(cal_block.clone())
+                .show_month_header(Style::new().bold());
+        
+        let inner_area = cal_block.inner(area);
+
+        f.render_widget(cal, inner_area);
+    
+    }
 }
 
 
