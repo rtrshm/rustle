@@ -9,5 +9,5 @@ edition = "2021"
 color-eyre = "0.6.2"
 crossterm = "0.27.0"
 ratatui = {version = "0.26.1", features = ["widget-calendar"]}
-time = "0.3.34"
+time = {version = "0.3.34", features = ["formatting"]}
 tui-textarea = "0.4.0"
