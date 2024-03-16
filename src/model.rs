@@ -25,7 +25,7 @@ pub struct Model<'a> {
     calendar_state: CalendarState,
     menu_state: MenuState,
     editbox_textarea: TextArea<'a>,
-    popup_textarea: TextArea<'a>
+    popup_textarea: TextArea<'a>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -101,23 +101,16 @@ pub fn handle_event(model: &mut Model) -> color_eyre::Result<Option<Message>> {
 fn handle_key(model: &mut Model, input: impl Into<Input>) -> Option<Message> {
     match model.active_window {
         ActiveWindow::EditBox => match input.into() {
-            Input {
-                key: Key::Tab,
-                ctrl: false,
-                alt: false,
-                shift: false,
-            } => Some(Message::SwitchWindows(ActiveWindow::Menu)),
+            Input { key: Key::Tab, .. } => Some(Message::SwitchWindows(ActiveWindow::Menu)),
             Input {
                 key: Key::Char('s'),
                 ctrl: true,
-                alt: false,
-                shift: false,
+                ..
             } => Some(Message::SaveFile),
             Input {
                 key: Key::Char('n'),
                 ctrl: true,
-                alt: false,
-                shift: false,
+                ..
             } => Some(Message::CreateNewFile),
             input => {
                 model.editbox_textarea.input(input);
@@ -129,22 +122,37 @@ fn handle_key(model: &mut Model, input: impl Into<Input>) -> Option<Message> {
             Input { key: Key::Esc, .. } => Some(Message::SwitchWindows(ActiveWindow::Menu)),
             Input {
                 key: Key::Enter, ..
-            } => Some(Message::SaveFile),
+            } => Some(Message::CreateFile),
             input => {
                 model.popup_textarea.input(input);
                 None
             }
         },
 
-        ActiveWindow::Menu => match input.into().key {
-            Key::Char('q') => Some(Message::Quit),
-            Key::Char('c') => Some(Message::ToggleCalendar),
-            Key::Tab => Some(Message::SwitchWindows(ActiveWindow::EditBox)),
-            Key::Up => Some(Message::Up),
-            Key::Down => Some(Message::Down),
-            Key::Left => Some(Message::Left),
-            Key::Right => Some(Message::Right),
-            Key::Enter => Some(Message::Enter),
+        ActiveWindow::Menu => match input.into() {
+            Input {
+                key: Key::Char('q'),
+                ..
+            } => Some(Message::Quit),
+            Input {
+                key: Key::Char('c'),
+                ..
+            } => Some(Message::ToggleCalendar),
+            Input {
+                key: Key::Char('n'),
+                ctrl: true,
+                ..
+            } => Some(Message::CreateNewFile),
+            Input { key: Key::Tab, .. } => Some(Message::SwitchWindows(ActiveWindow::EditBox)),
+            Input { key: Key::Up, .. } => Some(Message::Up),
+            Input { key: Key::Down, .. } => Some(Message::Down),
+            Input { key: Key::Left, .. } => Some(Message::Left),
+            Input {
+                key: Key::Right, ..
+            } => Some(Message::Right),
+            Input {
+                key: Key::Enter, ..
+            } => Some(Message::Enter),
             _ => None,
         },
     }
@@ -166,7 +174,7 @@ fn update_date(model: &mut Model, offset_in_days: i64) {
 fn update_listings(model: &mut Model, new_date: Date, set_selected: Option<&str>) {
     let mut to_select: i8 = 0;
     let mut menu_entries: Vec<MenuListing> = Vec::new();
-        
+
     if let Some(entries) = list_entries(new_date) {
         for (idx, entry) in entries.iter().enumerate() {
             if let Some(filename) = entry.file_name().to_str() {
@@ -187,12 +195,12 @@ fn update_listings(model: &mut Model, new_date: Date, set_selected: Option<&str>
 
     model.menu_state = MenuState {
         listings: menu_entries,
-        selected_file_idx: to_select
+        selected_file_idx: to_select,
     };
-    update_selected_listing(model, to_select);
+    update_selected(model, to_select);
 }
 
-fn update_selected_listing(model: &mut Model, new_idx: i8) {
+fn update_selected(model: &mut Model, new_idx: i8) {
     if new_idx >= 0 && new_idx < model.menu_state.listings.len() as i8 {
         if let Some(menu_listing) = model.menu_state.listings.get(new_idx as usize) {
             if let Ok(file) = read_to_string(&menu_listing.path) {
@@ -231,15 +239,16 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Message> {
             ]
             .iter()
             .collect();
+            let prefix = path.parent().unwrap();
+            std::fs::create_dir_all(prefix).unwrap();
+            File::create(path).expect("Failed to create");
+            model.editbox_textarea = TextArea::default();
+            update_listings(
+                model,
+                model.calendar_state.selected_date,
+                Some(current_name));
 
-            if File::create(path).is_ok() {
-                model.editbox_textarea = TextArea::default();
-                update_listings(
-                    model,
-                    model.calendar_state.selected_date,
-                    Some(current_name),
-                )
-            }
+            return Some(Message::SwitchWindows(ActiveWindow::Menu));
         }
 
         Message::SaveFile => {
@@ -248,7 +257,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Message> {
                 .listings
                 .get(model.menu_state.selected_file_idx as usize)
             {
-                return if let Ok(mut file) = File::create(&listing.path) {
+                if let Ok(mut file) = File::create(&listing.path) {
                     let bytes: Vec<u8> = model
                         .editbox_textarea
                         .lines()
@@ -258,11 +267,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Message> {
                     file.write_all(&bytes)
                         .expect("Failed to write current buffer");
                     file.flush().expect("Failed to flush");
-                    Some(Message::SwitchWindows(ActiveWindow::Menu))
-                } else {
-                    None
-                };
+                }
             }
+
+            // todo figure out selecting the current file
+            update_listings(model, model.calendar_state.selected_date, None);
         }
 
         Message::Up => {
@@ -271,7 +280,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Message> {
             }
 
             if model.active_window == ActiveWindow::Menu {
-                update_selected_listing(model, model.menu_state.selected_file_idx - 1);
+                update_selected(model, model.menu_state.selected_file_idx - 1);
             }
         }
 
@@ -281,21 +290,21 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Message> {
             }
 
             if model.active_window == ActiveWindow::Menu {
-                update_selected_listing(model, 1);
+                update_selected(model, model.menu_state.selected_file_idx + 1);
             }
         }
 
         Message::Left => {
             if model.calendar_state.enabled {
                 update_date(model, -1);
-                update_selected_listing(model, 0);
+                update_selected(model, 0);
             }
         }
 
         Message::Right => {
             if model.calendar_state.enabled {
                 update_date(model, 1);
-                update_selected_listing(model, 0);
+                update_selected(model, 0);
             }
         }
 
@@ -350,16 +359,18 @@ pub fn view(model: &mut Model, f: &mut Frame) {
             textarea_block = textarea_block.border_style(Style::default().fg(Color::LightBlue));
         }
         ActiveWindow::TextPopup => {
-            let area = Rect {
+            let textarea_popup_area = Rect {
                 width: 20,
                 height: 4,
                 x: 10,
                 y: MENU_LISTING_HEIGHT * ((model.menu_state.selected_file_idx as u16) + 1),
             };
 
-            let popup_textarea_block = Block::bordered().border_type(BorderType::Rounded);
+            let popup_textarea_block = Block::bordered()
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::LightBlue));
             model.popup_textarea.set_block(popup_textarea_block);
-            f.render_widget(model.popup_textarea.widget(), area);
+            f.render_widget(model.popup_textarea.widget(), textarea_popup_area);
         }
     };
 
@@ -390,6 +401,7 @@ pub fn view(model: &mut Model, f: &mut Frame) {
         "{date} - {listings} entries",
         date = format_date(model.calendar_state.selected_date),
         listings = model.menu_state.listings.len()
+
     ));
     f.render_widget(menu_block, layout[0]);
     f.render_widget(model.editbox_textarea.widget(), layout[1]);
