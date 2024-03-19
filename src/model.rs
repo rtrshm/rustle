@@ -1,14 +1,8 @@
 use crossterm::event::{self, Event, KeyEventKind};
-use ratatui::{
-    layout::*,
-    prelude::*,
-    style::{Color, Style},
-    widgets::calendar::{CalendarEventStore, Monthly},
-    widgets::*,
-};
 
+use log::info;
 use std::{
-    fs::{read_dir, read_to_string, DirEntry, File},
+    fs::{read_dir, read_to_string, File},
     io::prelude::*,
     path::PathBuf,
     time::Duration,
@@ -16,26 +10,277 @@ use std::{
 use time::{format_description, Date, OffsetDateTime};
 use tui_textarea::{Input, Key, TextArea};
 
-const MENU_LISTING_HEIGHT: u16 = 2;
+impl ModelState<'_> {
+    pub fn done(&mut self) -> bool {
+        self.running_state == RunningState::Done
+    }
 
-#[derive(Debug, Default)]
-pub struct Model<'a> {
+    pub fn terminate(&mut self) -> () {
+        self.running_state = RunningState::Done;
+    }
+
+    pub fn active_window(&self) -> &ActiveWindow {
+        &self.active_window
+    }
+
+    pub fn switch_window(&mut self, window: ActiveWindow) -> () {
+        self.active_window = window
+    }
+
+    pub fn num_menu_listings(&self) -> usize {
+        self.menu_state.listings.len()
+    }
+
+    /// reference to the currently selected MenuListing, if there is one
+    pub fn selected_listing(&self) -> Option<&MenuListing> {
+        return if self.menu_state.listings.len() != 0 {
+            Some(
+                self.menu_state
+                    .listings
+                    .get(self.menu_state.selected_file_idx as usize)
+                    .unwrap(),
+            )
+        } else {
+            None
+        };
+    }
+
+    pub fn clear_editbox(&mut self) -> &mut Self {
+        self.editbox_textarea = TextArea::default();
+        self
+    }
+
+    pub fn clear_popup_textarea(&mut self) -> &mut Self {
+        self.popup_textarea = TextArea::default();
+        self
+    }
+
+    pub fn listings(&self) -> &Vec<MenuListing> {
+        &self.menu_state.listings
+    }
+
+    pub fn select_next_listing(&mut self) -> &mut Self {
+        self.update_selected_by_index(self.menu_state.selected_file_idx + 1);
+        self
+    }
+
+    pub fn select_prev_listing(&mut self) -> &mut Self {
+        self.update_selected_by_index(self.menu_state.selected_file_idx - 1);
+        self
+    }
+
+    /// select different file by menu index, display its contents
+    pub fn update_selected_by_index(&mut self, new_idx: i8) -> &mut Self {
+        if new_idx >= 0 && new_idx < self.menu_state.listings.len() as i8 {
+            if let Some(menu_listing) = self.menu_state.listings.get(new_idx as usize) {
+                if let Ok(file) = read_to_string(&menu_listing.path) {
+                    self.menu_state.selected_file_idx = new_idx;
+
+                    let mut textarea_buffer = Vec::new();
+                    for line in file.lines() {
+                        textarea_buffer.push(line);
+                    }
+                    self.editbox_textarea = TextArea::from(textarea_buffer);
+                }
+            } else {
+                self.editbox_textarea = TextArea::default();
+            }
+        }
+        self
+    }
+
+    /// select different file by name, display contents
+    pub fn update_selected_by_name(&mut self, filename: &str) -> &mut Self {
+        for (idx, listing) in self.menu_state.listings.iter().enumerate() {
+            if listing.filename == filename {
+                self.menu_state.selected_file_idx = idx as i8
+            }
+        }
+        self
+    }
+
+    pub fn selected_date(&self) -> Date {
+        self.calendar_state.selected_date
+    }
+
+    pub fn refresh_menu(&mut self) -> &mut Self {
+        let dirname = Self::format_date(self.calendar_state.selected_date);
+        let mut path = PathBuf::new();
+        path.push("entries");
+        path.push(dirname);
+
+        return if let Ok(dir_entries) = read_dir(path) {
+            let new_listings = Vec::from(
+                dir_entries
+                    .map(|e| {
+                        let entry = e.unwrap();
+                        MenuListing {
+                            path: entry.path(),
+                            filename: String::from(entry.file_name().to_str().unwrap()),
+                        }
+                    })
+                    .collect::<Vec<MenuListing>>(),
+            );
+
+            self.menu_state = MenuState {
+                listings: new_listings,
+                ..self.menu_state
+            };
+            info!(
+                "Refreshed; current menu state: {:?}",
+                self.menu_state.listings
+            );
+            self
+        } else {
+            // if no entries found, clear the menu and editbox
+            self.menu_state = MenuState {
+                listings: Vec::new(),
+                ..self.menu_state
+            };
+
+            self.clear_editbox()
+        };
+    }
+
+    pub fn popup_textarea_content(&self) -> String {
+        self.popup_textarea.lines()[0].to_owned()
+    }
+
+    pub fn selected_file_idx(&self) -> usize {
+        self.menu_state.selected_file_idx as usize
+    }
+
+    pub fn save_selected_file(&mut self) -> &mut Self {
+        let bytes: Vec<u8> = self
+            .editbox_textarea
+            .lines()
+            .iter()
+            .flat_map(|s| s.as_bytes().iter().copied())
+            .collect();
+
+        let selected_listing = self.selected_listing().unwrap();
+        if let Ok(mut file) = File::create(&selected_listing.path) {
+            file.write_all(&bytes)
+                .expect("failed to save textarea content");
+            file.flush().expect("failed to flush");
+        }
+
+        self
+    }
+
+    pub fn selected_date_formatted(&self) -> String {
+        Self::format_date(self.calendar_state.selected_date).to_owned()
+    }
+
+    pub fn save_new_file(&mut self) -> &mut Self {
+        let file_path: PathBuf = [
+            "entries",
+            self.selected_date_formatted().as_str(),
+            &self.popup_textarea_content(),
+        ]
+        .iter()
+        .collect();
+
+        let prefix = file_path.parent().unwrap();
+        std::fs::create_dir_all(prefix).unwrap();
+        if File::create(&file_path).is_ok() {
+            let filename = String::from(file_path.file_name().unwrap().to_str().unwrap());
+            let update_name = filename.clone();
+
+            self.menu_state.listings.push(MenuListing {
+                filename,
+                path: file_path,
+            });
+
+            self.refresh_menu().update_selected_by_name(&update_name)
+        } else {
+            info!("Failed to create file");
+            self
+        }
+    }
+
+    pub fn input_editbox(&mut self, input: tui_textarea::Input) -> &mut Self {
+        self.editbox_textarea.input(input);
+        self
+    }
+
+    pub fn input_popup(&mut self, input: tui_textarea::Input) -> &mut Self {
+        self.popup_textarea.input(input);
+        self
+    }
+
+    pub fn calendar_enabled(&self) -> bool {
+        self.calendar_state.enabled
+    }
+
+    pub fn select_prev_day(&mut self) -> &mut Self {
+        self.update_date(-1)
+    }
+
+    pub fn select_next_day(&mut self) -> &mut Self {
+        self.update_date(1)
+    }
+
+    pub fn select_next_week(&mut self) -> &mut Self {
+        self.update_date(7)
+    }
+
+    pub fn select_prev_week(&mut self) -> &mut Self {
+        self.update_date(-7)
+    }
+
+    fn update_date(&mut self, offset_in_days: i64) -> &mut Self {
+        return if let Some(result_date) = self
+            .calendar_state
+            .selected_date
+            .checked_add(time::Duration::days(offset_in_days))
+        {
+            if self.calendar_state.selected_date.month() == result_date.month() {
+                self.calendar_state = CalendarState {
+                    selected_date: result_date,
+                    enabled: true,
+                };
+
+                // select top of list on successful date change
+                self.refresh_menu().update_selected_by_index(0)
+            } else {
+                self
+            }
+        } else {
+            self
+        };
+    }
+
+    fn format_date(date: Date) -> String {
+        let format = format_description::parse("[year]-[month]-[day]").unwrap();
+        date.format(&format).unwrap()
+    }
+
+    pub fn toggle_calendar(&mut self) -> () {
+        self.calendar_state.enabled = !self.calendar_state.enabled;
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ModelState<'a> {
     pub running_state: RunningState,
     active_window: ActiveWindow,
     calendar_state: CalendarState,
     menu_state: MenuState,
-    editbox_textarea: TextArea<'a>,
-    popup_textarea: TextArea<'a>,
+
+    // would ideally be char buffers
+    pub editbox_textarea: TextArea<'a>,
+    pub popup_textarea: TextArea<'a>,
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub enum RunningState {
     #[default]
     Running,
     Done,
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub enum ActiveWindow {
     #[default]
     Menu,
@@ -43,7 +288,7 @@ pub enum ActiveWindow {
     TextPopup,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct CalendarState {
     enabled: bool,
     selected_date: Date,
@@ -58,16 +303,16 @@ impl Default for CalendarState {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MenuState {
     selected_file_idx: i8,
     listings: Vec<MenuListing>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct MenuListing {
     path: PathBuf,
-    filename: String,
+    pub filename: String,
 }
 
 #[derive(PartialEq)]
@@ -87,7 +332,7 @@ pub enum Message {
     Other,
 }
 
-pub fn handle_event(model: &mut Model) -> color_eyre::Result<Option<Message>> {
+pub fn handle_event(model: ModelState) -> color_eyre::Result<Option<Message>> {
     if event::poll(Duration::from_millis(250))? {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
@@ -98,7 +343,7 @@ pub fn handle_event(model: &mut Model) -> color_eyre::Result<Option<Message>> {
     Ok(None)
 }
 
-fn handle_key(model: &mut Model, input: impl Into<Input>) -> Option<Message> {
+fn handle_key(mut model: ModelState, input: impl Into<Input>) -> Option<Message> {
     match model.active_window {
         ActiveWindow::EditBox => match input.into() {
             Input { key: Key::Tab, .. } => Some(Message::SwitchWindows(ActiveWindow::Menu)),
@@ -155,280 +400,5 @@ fn handle_key(model: &mut Model, input: impl Into<Input>) -> Option<Message> {
             } => Some(Message::Enter),
             _ => None,
         },
-    }
-}
-
-fn update_date(model: &mut Model, offset_in_days: i64) {
-    let result = model
-        .calendar_state
-        .selected_date
-        .checked_add(time::Duration::days(offset_in_days));
-    if let Some(result_date) = result {
-        if result_date.month() == model.calendar_state.selected_date.month() {
-            model.calendar_state.selected_date = result_date;
-            update_listings(model, result_date, None);
-        }
-    }
-}
-
-fn update_listings(model: &mut Model, new_date: Date, set_selected: Option<&str>) {
-    let mut to_select: i8 = 0;
-    let mut menu_entries: Vec<MenuListing> = Vec::new();
-
-    if let Some(entries) = list_entries(new_date) {
-        for (idx, entry) in entries.iter().enumerate() {
-            if let Some(filename) = entry.file_name().to_str() {
-                if let Some(to_be_selected) = set_selected {
-                    if filename == to_be_selected {
-                        to_select = idx as i8;
-                    }
-                }
-                menu_entries.push(MenuListing {
-                    path: entry.path(),
-                    filename: String::from(filename),
-                });
-            }
-        }
-    } else {
-        model.editbox_textarea = TextArea::default();
-    }
-
-    model.menu_state = MenuState {
-        listings: menu_entries,
-        selected_file_idx: to_select,
-    };
-    update_selected(model, to_select);
-}
-
-fn update_selected(model: &mut Model, new_idx: i8) {
-    if new_idx >= 0 && new_idx < model.menu_state.listings.len() as i8 {
-        if let Some(menu_listing) = model.menu_state.listings.get(new_idx as usize) {
-            if let Ok(file) = read_to_string(&menu_listing.path) {
-                model.menu_state.selected_file_idx = new_idx;
-
-                let mut textarea_buffer = Vec::new();
-                for line in file.lines() {
-                    textarea_buffer.push(line);
-                }
-                model.editbox_textarea = TextArea::from(textarea_buffer);
-            }
-        }
-    }
-}
-
-pub fn update(model: &mut Model, msg: Message) -> Option<Message> {
-    match msg {
-        Message::Quit => {
-            model.running_state = RunningState::Done;
-        }
-        Message::SwitchWindows(window) => model.active_window = window,
-
-        Message::ToggleCalendar => {
-            model.calendar_state.enabled = !model.calendar_state.enabled;
-        }
-
-        Message::CreateNewFile => return Some(Message::SwitchWindows(ActiveWindow::TextPopup)),
-
-        Message::CreateFile => {
-            let current_name = &model.popup_textarea.lines()[0].replace('\n', ".txt");
-            let path: PathBuf = [
-                ".",
-                "entries",
-                &format_date(model.calendar_state.selected_date),
-                &current_name,
-            ]
-            .iter()
-            .collect();
-            let prefix = path.parent().unwrap();
-            std::fs::create_dir_all(prefix).unwrap();
-            File::create(path).expect("Failed to create");
-            model.editbox_textarea = TextArea::default();
-            update_listings(
-                model,
-                model.calendar_state.selected_date,
-                Some(current_name));
-
-            return Some(Message::SwitchWindows(ActiveWindow::Menu));
-        }
-
-        Message::SaveFile => {
-            if let Some(listing) = model
-                .menu_state
-                .listings
-                .get(model.menu_state.selected_file_idx as usize)
-            {
-                if let Ok(mut file) = File::create(&listing.path) {
-                    let bytes: Vec<u8> = model
-                        .editbox_textarea
-                        .lines()
-                        .iter()
-                        .flat_map(|s| s.as_bytes().iter().copied())
-                        .collect();
-                    file.write_all(&bytes)
-                        .expect("Failed to write current buffer");
-                    file.flush().expect("Failed to flush");
-                }
-            }
-
-            // todo figure out selecting the current file
-            update_listings(model, model.calendar_state.selected_date, None);
-        }
-
-        Message::Up => {
-            if model.calendar_state.enabled {
-                update_date(model, -7);
-            }
-
-            if model.active_window == ActiveWindow::Menu {
-                update_selected(model, model.menu_state.selected_file_idx - 1);
-            }
-        }
-
-        Message::Down => {
-            if model.calendar_state.enabled {
-                update_date(model, 7);
-            }
-
-            if model.active_window == ActiveWindow::Menu {
-                update_selected(model, model.menu_state.selected_file_idx + 1);
-            }
-        }
-
-        Message::Left => {
-            if model.calendar_state.enabled {
-                update_date(model, -1);
-                update_selected(model, 0);
-            }
-        }
-
-        Message::Right => {
-            if model.calendar_state.enabled {
-                update_date(model, 1);
-                update_selected(model, 0);
-            }
-        }
-
-        Message::Enter => {
-            if model.calendar_state.enabled {
-                model.calendar_state.enabled = !model.calendar_state.enabled;
-            }
-        }
-        _ => return None,
-    }
-    None
-}
-
-fn format_date(date: Date) -> String {
-    let format = format_description::parse("[year]-[month]-[day]").unwrap();
-    date.format(&format).unwrap()
-}
-
-fn list_entries(selected_date: Date) -> Option<Vec<DirEntry>> {
-    let dirname = format_date(selected_date);
-    let mut path = PathBuf::new();
-    path.push("entries");
-    path.push(dirname);
-
-    let mut result = Vec::new();
-
-    if let Ok(dir_entries) = read_dir(path) {
-        for dir_entry in dir_entries.flatten() {
-            result.push(dir_entry);
-        }
-        Some(result)
-    } else {
-        None
-    }
-}
-
-pub fn view(model: &mut Model, f: &mut Frame) {
-    let layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(vec![Constraint::Ratio(1, 3), Constraint::Ratio(2, 3)])
-        .split(f.size());
-
-    let mut textarea_block = Block::default().borders(Borders::ALL).title("textArea");
-
-    let mut menu_block = Block::default().borders(Borders::ALL);
-
-    match model.active_window {
-        ActiveWindow::Menu => {
-            menu_block = menu_block.border_style(Style::default().fg(Color::LightBlue));
-        }
-        ActiveWindow::EditBox => {
-            textarea_block = textarea_block.border_style(Style::default().fg(Color::LightBlue));
-        }
-        ActiveWindow::TextPopup => {
-            let textarea_popup_area = Rect {
-                width: 20,
-                height: 4,
-                x: 10,
-                y: MENU_LISTING_HEIGHT * ((model.menu_state.selected_file_idx as u16) + 1),
-            };
-
-            let popup_textarea_block = Block::bordered()
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::LightBlue));
-            model.popup_textarea.set_block(popup_textarea_block);
-            f.render_widget(model.popup_textarea.widget(), textarea_popup_area);
-        }
-    };
-
-    model.editbox_textarea.set_block(textarea_block);
-
-    let limit_in_view: usize = (layout[0].as_size().height / MENU_LISTING_HEIGHT - 1).into();
-
-    let menu_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(vec![Constraint::Length(MENU_LISTING_HEIGHT); limit_in_view])
-        .split(menu_block.inner(layout[0]));
-
-    for (idx, menu_listing) in model.menu_state.listings.iter().enumerate() {
-        let mut entry_block = Block::new();
-        if model.menu_state.selected_file_idx == idx as i8 {
-            entry_block = entry_block.style(Style::new().bg(Color::LightBlue));
-        }
-
-        f.render_widget(
-            Paragraph::new(String::from(&menu_listing.filename))
-                .block(entry_block)
-                .centered(),
-            menu_layout[idx],
-        );
-    }
-
-    menu_block = menu_block.title(format!(
-        "{date} - {listings} entries",
-        date = format_date(model.calendar_state.selected_date),
-        listings = model.menu_state.listings.len()
-
-    ));
-    f.render_widget(menu_block, layout[0]);
-    f.render_widget(model.editbox_textarea.widget(), layout[1]);
-
-    if model.calendar_state.enabled {
-        let mut cal_event_store =
-            CalendarEventStore::today(Style::new().light_blue().add_modifier(Modifier::UNDERLINED));
-        cal_event_store.add(
-            model.calendar_state.selected_date,
-            Style::new().yellow().bold(),
-        );
-
-        let area = Rect {
-            width: 30,
-            height: 12,
-            x: 5,
-            y: f.size().height - 12,
-        };
-
-        let cal_block = Block::bordered().border_type(BorderType::Rounded);
-
-        let cal = Monthly::new(model.calendar_state.selected_date, cal_event_store)
-            .block(cal_block.clone())
-            .show_month_header(Style::new().bold());
-
-        let inner_area = cal_block.inner(area);
-
-        f.render_widget(cal, inner_area);
     }
 }

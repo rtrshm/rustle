@@ -8,6 +8,8 @@ edition = "2021"
 [dependencies]
 color-eyre = "0.6.2"
 crossterm = "0.27.0"
+log = "0.4.21"
 ratatui = {version = "0.26.1", features = ["widget-calendar"]}
+simple-logging = "2.0.2"
 time = {version = "0.3.34", features = ["formatting"]}
 tui-textarea = "0.4.0"

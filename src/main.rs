@@ -1,44 +1,17 @@
-use crossterm::{
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-    ExecutableCommand,
-};
-use ratatui::prelude::*;
-use std::io::stdout;
+use log::LevelFilter;
+use simple_logging;
+use std::env;
 
+pub mod control;
 pub mod model;
-
-use crate::model::{handle_event, update, view, Model, RunningState};
-
-// hook to avoid mangling the terminal on panic
-fn initialize_panic_handler() {
-    let original_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |panic_info| {
-        crossterm::execute!(std::io::stderr(), crossterm::terminal::LeaveAlternateScreen).unwrap();
-        crossterm::terminal::disable_raw_mode().unwrap();
-        original_hook(panic_info);
-    }));
-}
+pub mod view;
 
 fn main() -> color_eyre::Result<()> {
-    stdout().execute(EnterAlternateScreen)?;
-    enable_raw_mode()?;
-    let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
-    terminal.clear()?;
+    env::set_var("RUST_BACKTRACE", "1");
+    simple_logging::log_to_file("test.log", LevelFilter::Info)?;
 
-    initialize_panic_handler();
-    let mut model = Model::default();
-
-    while model.running_state != RunningState::Done {
-        terminal.draw(|frame| view(&mut model, frame))?;
-
-        let mut current_message = handle_event(&mut model)?;
-
-        while current_message.is_some() {
-            current_message = update(&mut model, current_message.unwrap());
-        }
+    if let Err(e) = control::run() {
+        println!("{}", e)
     }
-
-    stdout().execute(LeaveAlternateScreen)?;
-    disable_raw_mode()?;
     Ok(())
 }
