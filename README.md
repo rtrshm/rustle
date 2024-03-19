@@ -1,4 +1,4 @@
-#### rustle
+## rustle
 WIP Terminal-based journaling tool
 ###### Controls
 - `q`: quit
@@ -7,7 +7,7 @@ WIP Terminal-based journaling tool
 - `ctrl` + `n`: create new file
 - `ctrl` + `s`: save current file (with editbox in focus)
 ###### Info
-- Entries are stored under /entries/`[date]`
+- Entries are stored under ./entries/`[date]`
 
 ###### Dependencies
 - crossterm: Rust terminal backend
