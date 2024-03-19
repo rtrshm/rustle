@@ -1,14 +1,12 @@
-use crossterm::event::{self, Event, KeyEventKind};
 
 use log::info;
 use std::{
     fs::{read_dir, read_to_string, File},
     io::prelude::*,
     path::PathBuf,
-    time::Duration,
 };
 use time::{format_description, Date, OffsetDateTime};
-use tui_textarea::{Input, Key, TextArea};
+use tui_textarea::TextArea;
 
 impl ModelState<'_> {
     pub fn done(&mut self) -> bool {
@@ -313,92 +311,4 @@ pub struct MenuState {
 pub struct MenuListing {
     path: PathBuf,
     pub filename: String,
-}
-
-#[derive(PartialEq)]
-pub enum Message {
-    SwitchWindows(ActiveWindow),
-    CreateNewFile,
-    CreateFile,
-    SaveFile,
-    Left,
-    Right,
-    Down,
-    Up,
-    Save,
-    Quit,
-    ToggleCalendar,
-    Enter,
-    Other,
-}
-
-pub fn handle_event(model: ModelState) -> color_eyre::Result<Option<Message>> {
-    if event::poll(Duration::from_millis(250))? {
-        if let Event::Key(key) = event::read()? {
-            if key.kind == KeyEventKind::Press {
-                return Ok(handle_key(model, key));
-            }
-        }
-    }
-    Ok(None)
-}
-
-fn handle_key(mut model: ModelState, input: impl Into<Input>) -> Option<Message> {
-    match model.active_window {
-        ActiveWindow::EditBox => match input.into() {
-            Input { key: Key::Tab, .. } => Some(Message::SwitchWindows(ActiveWindow::Menu)),
-            Input {
-                key: Key::Char('s'),
-                ctrl: true,
-                ..
-            } => Some(Message::SaveFile),
-            Input {
-                key: Key::Char('n'),
-                ctrl: true,
-                ..
-            } => Some(Message::CreateNewFile),
-            input => {
-                model.editbox_textarea.input(input);
-                None
-            }
-        },
-
-        ActiveWindow::TextPopup => match input.into() {
-            Input { key: Key::Esc, .. } => Some(Message::SwitchWindows(ActiveWindow::Menu)),
-            Input {
-                key: Key::Enter, ..
-            } => Some(Message::CreateFile),
-            input => {
-                model.popup_textarea.input(input);
-                None
-            }
-        },
-
-        ActiveWindow::Menu => match input.into() {
-            Input {
-                key: Key::Char('q'),
-                ..
-            } => Some(Message::Quit),
-            Input {
-                key: Key::Char('c'),
-                ..
-            } => Some(Message::ToggleCalendar),
-            Input {
-                key: Key::Char('n'),
-                ctrl: true,
-                ..
-            } => Some(Message::CreateNewFile),
-            Input { key: Key::Tab, .. } => Some(Message::SwitchWindows(ActiveWindow::EditBox)),
-            Input { key: Key::Up, .. } => Some(Message::Up),
-            Input { key: Key::Down, .. } => Some(Message::Down),
-            Input { key: Key::Left, .. } => Some(Message::Left),
-            Input {
-                key: Key::Right, ..
-            } => Some(Message::Right),
-            Input {
-                key: Key::Enter, ..
-            } => Some(Message::Enter),
-            _ => None,
-        },
-    }
 }
