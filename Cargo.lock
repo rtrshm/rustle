@@ -430,7 +430,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-to-do"
+name = "rustc-demangle"
+version = "0.1.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d626bb9dae77e28219937af045c257c28bfd3f69333c512553507f5f9798cb76"
+
+[[package]]
+name = "rustle"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
@@ -441,12 +447,6 @@ dependencies = [
  "time",
  "tui-textarea",
 ]
-
-[[package]]
-name = "rustc-demangle"
-version = "0.1.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d626bb9dae77e28219937af045c257c28bfd3f69333c512553507f5f9798cb76"
 
 [[package]]
 name = "rustversion"
