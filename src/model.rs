@@ -93,7 +93,7 @@ impl ModelState<'_> {
     pub fn update_selected_by_name(&mut self, filename: &str) -> &mut Self {
         for (idx, listing) in self.menu_state.listings.iter().enumerate() {
             if listing.filename == filename {
-                self.menu_state.selected_file_idx = idx as i8
+                return self.update_selected_by_index(idx as i8)
             }
         }
         self
