@@ -153,7 +153,7 @@ impl ModelState<'_> {
             .editbox_textarea
             .lines()
             .iter()
-            .flat_map(|s| s.as_bytes().iter().copied())
+            .flat_map(|s| s.as_bytes().iter().copied().chain(std::iter::once(b'\n')))
             .collect();
 
         let selected_listing = self.selected_listing().unwrap();
