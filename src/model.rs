@@ -31,16 +31,9 @@ impl ModelState<'_> {
 
     /// reference to the currently selected MenuListing, if there is one
     pub fn selected_listing(&self) -> Option<&MenuListing> {
-        return if self.menu_state.listings.len() != 0 {
-            Some(
-                self.menu_state
-                    .listings
-                    .get(self.menu_state.selected_file_idx as usize)
-                    .unwrap(),
-            )
-        } else {
-            None
-        };
+        self.menu_state
+        .listings
+        .get(self.menu_state.selected_file_idx as usize)
     }
 
     pub fn clear_editbox(&mut self) -> &mut Self {
