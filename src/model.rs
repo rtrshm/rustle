@@ -121,7 +121,11 @@ impl ModelState<'_> {
                 "Refreshed; current menu state: {:?}",
                 self.menu_state.listings
             );
-            self
+            return if self.selected_listing().is_some() {
+                self.update_selected_by_index(self.menu_state.selected_file_idx)
+            } else {
+                self
+            }
         } else {
             // if no entries found, clear the menu and editbox
             self.menu_state = MenuState {
