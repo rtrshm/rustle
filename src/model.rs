@@ -141,22 +141,28 @@ impl ModelState<'_> {
         self.menu_state.selected_file_idx as usize
     }
 
-    pub fn save_selected_file(&mut self) -> &mut Self {
+    pub fn write_editbox_to_file(&mut self, mut file: File) -> &mut Self {
         let bytes: Vec<u8> = self
             .editbox_textarea
             .lines()
             .iter()
             .flat_map(|s| s.as_bytes().iter().copied().chain(std::iter::once(b'\n')))
-            .collect();
-
-        let selected_listing = self.selected_listing().unwrap();
-        if let Ok(mut file) = File::create(&selected_listing.path) {
-            file.write_all(&bytes)
-                .expect("failed to save textarea content");
-            file.flush().expect("failed to flush");
-        }
+            .collect();        
+        
+        file.write_all(&bytes).expect("Failed to write textbox to file");
+        file.flush().expect("Failed to flush");
 
         self
+    }
+
+    pub fn save_selected_file(&mut self) -> &mut Self {
+
+        let selected_listing = self.selected_listing().unwrap();
+        return if let Ok(file) = File::create(&selected_listing.path) {
+            self.write_editbox_to_file(file)
+        } else {
+            self
+        }
     }
 
     pub fn selected_date_formatted(&self) -> String {
@@ -174,7 +180,8 @@ impl ModelState<'_> {
 
         let prefix = file_path.parent().unwrap();
         std::fs::create_dir_all(prefix).unwrap();
-        if File::create(&file_path).is_ok() {
+        if let Ok(file) = File::create(&file_path) {
+
             let filename = String::from(file_path.file_name().unwrap().to_str().unwrap());
             let update_name = filename.clone();
 
@@ -183,7 +190,7 @@ impl ModelState<'_> {
                 path: file_path,
             });
 
-            self.refresh_menu().update_selected_by_name(&update_name)
+            self.write_editbox_to_file(file).refresh_menu().update_selected_by_name(&update_name)
         } else {
             info!("Failed to create file");
             self

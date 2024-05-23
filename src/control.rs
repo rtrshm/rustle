@@ -76,7 +76,7 @@ fn handle_key(model: &mut ModelState, input: impl Into<Input>) -> Option<Message
                 key: Key::Char('n'),
                 ctrl: true,
                 ..
-            } => Some(Message::CreateNewFile),
+            } => Some(Message::OpenFilenameEditbox),
             input => {
                 model.input_editbox(input);
                 None
@@ -111,7 +111,7 @@ fn handle_key(model: &mut ModelState, input: impl Into<Input>) -> Option<Message
                 key: Key::Char('n'),
                 ctrl: true,
                 ..
-            } => Some(Message::CreateNewFile),
+            } => Some(Message::OpenFilenameEditbox),
             Input { key: Key::Tab, .. } => Some(Message::SwitchWindows(ActiveWindow::EditBox)),
             Input { key: Key::Up, .. } => Some(Message::Up),
             Input { key: Key::Down, .. } => Some(Message::Down),
@@ -136,7 +136,7 @@ fn update(model: &mut ModelState, msg: Message) -> Option<Message> {
         Message::ToggleCalendar => {
             model.toggle_calendar();
         }
-        Message::CreateNewFile => {
+        Message::OpenFilenameEditbox => {
             model.switch_window(ActiveWindow::TextPopup);
         }
         Message::CreateFile => {
@@ -147,7 +147,11 @@ fn update(model: &mut ModelState, msg: Message) -> Option<Message> {
         }
 
         Message::SaveFile => {
-            model.save_selected_file();
+            if model.selected_listing().is_none() {
+                return Some(Message::OpenFilenameEditbox)
+            } else {
+                model.save_selected_file();
+            }
         }
 
         Message::Up => {
@@ -191,7 +195,7 @@ fn update(model: &mut ModelState, msg: Message) -> Option<Message> {
 #[derive(PartialEq)]
 pub enum Message {
     SwitchWindows(crate::model::ActiveWindow),
-    CreateNewFile,
+    OpenFilenameEditbox,
     CreateFile,
     SaveFile,
     Left,
