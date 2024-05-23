@@ -20,6 +20,7 @@ pub fn run() -> color_eyre::Result<()> {
 
     initialize_panic_handler();
     let mut model = ModelState::default();
+    let mut model = model.refresh_menu();
 
     loop {
         if model.done() {
