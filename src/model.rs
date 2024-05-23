@@ -190,7 +190,13 @@ impl ModelState<'_> {
                 path: file_path,
             });
 
-            self.write_editbox_to_file(file).refresh_menu().update_selected_by_name(&update_name)
+// only push current contents into new file if none is selected to avoid leaking contents between files
+            return if self.selected_listing().is_none() {
+    
+                self.write_editbox_to_file(file).refresh_menu().update_selected_by_name(&update_name)
+            } else {
+                self.refresh_menu().update_selected_by_name(&update_name)
+            }
         } else {
             info!("Failed to create file");
             self
