@@ -4,13 +4,20 @@ use crossterm::{
     ExecutableCommand,
 };
 
-use crate::model::{ActiveWindow, ModelState};
+// use crate::{ActiveWindow, ModelState};
+
+mod model;
+use model::{ModelState, ActiveWindow};
+
+mod view;
+use view::view;
+
 use ratatui::prelude::*;
 use std::io::stdout;
 use std::time::Duration;
 use tui_textarea::{Input, Key};
 
-use crate::view::view;
+// use crate::view::view;
 
 pub fn run() -> color_eyre::Result<()> {
     stdout().execute(EnterAlternateScreen)?;
